@@ -60,7 +60,8 @@ function toJsonSchema(spec: Record<string, { type: string; required?: boolean; d
   return { type: 'object', properties, required, additionalProperties: false };
 }
 
-function buildKeyboard(buttons: CardButtonArg[]) {
+/** 构建 QQ 官方 inline keyboard（供 qq-card 工具与 user-questions 提问卡片复用） */
+export function buildKeyboard(buttons: CardButtonArg[]) {
   if (buttons.length === 0) return undefined;
   return {
     content: {

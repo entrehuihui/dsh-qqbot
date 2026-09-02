@@ -18,6 +18,7 @@ import { setupMiddlewares } from './middleware-setup.js';
 import { registerQQMediaTools } from '../tools/qq-media.js';
 import { registerQQCardTools } from '../tools/qq-card.js';
 import { registerInteractionHandler } from './interaction.js';
+import { UserQuestionsFeature } from '../features/user-questions.js';
 import { startMediaCleanup } from '../media/media-cleaner.js';
 import { ensureVisionInputModal, registerDescribeImageTool } from '../media/vision-tool.js';
 
@@ -50,16 +51,19 @@ export async function bootstrapGateway(
   registerQQCardTools(ctx, manager, bot, logger);
 
   // ── 入站：经过中间件链后的消息交给 dsh agent ──
+  // 提问 Provider（userQuestions）在消息与交互事件之前创建，供两者分流查询
+  const userQuestions = new UserQuestionsFeature(ctx, manager, bot, config, logger);
+
   bot.on('message', async (mCtx: MiddlewareContext) => {
     const msg = mCtx.message;
     if (config.debug) {
       logger.debug(`← message (post-middleware): ${JSON.stringify(msg, null, 2).slice(0, 500)}`);
     }
-    await handleInbound(msg, manager, config, logger, mCtx.state);
+    await handleInbound(msg, manager, config, logger, mCtx.state, userQuestions);
   });
 
-  // ── 交互事件：按钮点击 → Agent ──
-  registerInteractionHandler(bot, manager, logger);
+  // ── 交互事件：按钮点击 → Agent（提问按钮先分流，未命中走 followup） ──
+  registerInteractionHandler(bot, manager, logger, userQuestions);
 
   // ── 出站：dsh session/event → QQ 消息 ──
   // 获取 tools 服务（工具结果结构化展示，参考 dsh-TUI presentResult），可选

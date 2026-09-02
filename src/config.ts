@@ -75,6 +75,10 @@ export interface ImQQBotConfig {
   access: AccessControlConfig;
   /** 是否展示工具调用成功结果（工具错误始终展示） */
   showToolResults: boolean;
+  /** 提问超时(ms)，用户未在期限内回答则 ASK_ABORTED，防止会话永久挂起 */
+  questionTimeoutMs: number;
+  /** 提问卡片发送失败时降级为纯文字提问（仍等文字答案） */
+  questionTextFallback: boolean;
   /** 调试模式 */
   debug: boolean;
   /** 富媒体理解（图片/视频） */
@@ -111,6 +115,8 @@ export const ConfigSchema: Schema<ImQQBotConfig> = Schema.object({
     groupAllow: [],
   }).description('访问控制'),
   showToolResults: Schema.boolean().default(false).description('是否展示工具调用成功结果（错误始终展示）'),
+  questionTimeoutMs: Schema.number().default(10 * 60 * 1000).description('提问超时(ms)，超时自动中止提问'),
+  questionTextFallback: Schema.boolean().default(true).description('提问卡片发送失败时降级为纯文字提问'),
   debug: Schema.boolean().default(false),
   media: Schema.object({
     enabled: Schema.boolean().default(true).description('是否启用富媒体理解（图片/视频下载 + 工具分析）'),

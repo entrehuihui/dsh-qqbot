@@ -13,6 +13,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import type { SessionManager } from '../session/index.js';
 import type { ImQQBotConfig } from '../config.js';
 import type { ChatScope, Logger, QuotedAttachment, RawAttachment, ReplyTarget } from '../types.js';
+import type { UserQuestionsFeature } from '../features/user-questions.js';
 import {
   classifyContentType,
   isVoiceContentType,
@@ -90,6 +91,7 @@ export async function handleInbound(
   config: ImQQBotConfig,
   logger: Logger,
   state?: Record<string, unknown>,
+  userQuestions?: UserQuestionsFeature,
 ): Promise<void> {
   const msg = rawMsg as ProcessedMessage;
   const mwState = (state ?? {}) as MiddlewareState;
@@ -117,6 +119,16 @@ export async function handleInbound(
   } catch (err) {
     logger.error(`ERROR creating session: ${err instanceof Error ? err.message : String(err)}`);
     return;
+  }
+
+  // ── 提问答案分流：该 peer 的 agent 有挂起提问时，文字作为答案消费 ──
+  // （msg.content 已经 contentSanitizer 清洗，去掉了 @bot 标记与表情标签）
+  if (userQuestions && userQuestions.hasPending(record.agent)) {
+    const answerText = (msg.content ?? '').trim();
+    if (answerText.length > 0 && userQuestions.resolveText(record.agent, answerText)) {
+      logger.info(`im-qqbot: inbound consumed as question answer: key=${scope}:${peerId} text="${answerText.slice(0, 100)}"`);
+      return;
+    }
   }
 
   // ── 构建 UserMessage → followup ──
