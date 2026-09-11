@@ -1,13 +1,20 @@
 /**
- * QQ 端 userQuestions Provider — 提问渲染与答案收集
+ * QQ 端 userQuestions answerer — 提问渲染与答案收集
  *
  * 将 QQ 会话里 `ask_user_question` 的提问渲染成 QQ 卡片（markdown + 键盘按钮），
  * 主人点按钮或回复文字即可回答，不再卡死在 web 端。
  *
- * 设计要点（对照 Stage 01 方案 §4.2）：
- * - 注册时机：`agent/created` 时通过 `agentPresets.serviceFor(agent, 'userQuestions')`
- *   取该 agent 所属 preset 的隔离 userQuestions 实例；同 preset standing 共享，
- *   用 WeakSet 去重只注册一次。
+ * 设计要点（适配 dsh 0.1.5 的 scoped waterfall API）：
+ * - dsh 0.1.5 起 `@deepseek-ai/dsh-user-questions` 由「Provider 注册」改为
+ *   「scoped waterfall 事件」：UserQuestionService.ask() 内部通过
+ *   `ctx.waterfall(scopeTarget(agent, agent), 'user-questions/request',
+ *   {...request, agent}, noAnswerer)` 分发。answerer 不再调用 registerProvider
+ *   （新版 Service 上该方法已不存在），而是监听 `user-questions/request` 事件，
+ *   handler 签名 `(request, next)`：不调 next() 且返回 Promise 即消费，调 next()
+ *   放行给下一个 answerer（web 弹窗）。
+ * - 本插件在插件 root ctx 注册监听器；scopeTarget 的 filter 对无 scope tag 的
+ *   root 监听器永远放行，因此能收到所有 QQ agent 的 scoped 提问事件，再用
+ *   `manager.findByAgent(agent)` 校验该 agent 是否属于本插件管理的 QQ 会话。
  * - pending 按 `agent.id` 键控，多问题逐个回答，全部答完才 resolve。
  * - 按钮 data 编码 `uq:<agentId>:<qi>:<oi>`，interaction 分流时按 agentId 双保险校验。
  * - 超时（questionTimeoutMs）与 request.signal abort 均 reject `ASK_ABORTED`。
@@ -17,7 +24,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { QQBot } from '@tencent-connect/qqbot-nodejs';
 import type { ImQQBotConfig } from '../config.js';
 import type { SessionManager, SessionRecord } from '../session/index.js';
-import type { AgentPresetsLike, DshAgent } from '../session/types.js';
+import type { DshAgent } from '../session/types.js';
 import type { Logger } from '../types.js';
 import { buildKeyboard } from '../tools/qq-card.js';
 
@@ -85,9 +92,6 @@ const BUTTON_PREFIX = 'uq:';
 export class UserQuestionsFeature {
   /** agentId → PendingQuestion */
   private readonly pending = new Map<string, PendingQuestion>();
-  /** 已注册过 Provider 的 UserQuestionService 实例（standing 共享，去重） */
-  private readonly providerRegistered = new WeakSet<object>();
-  private readonly presets: AgentPresetsLike | undefined;
 
   constructor(
     private readonly ctx: Context,
@@ -96,80 +100,42 @@ export class UserQuestionsFeature {
     private readonly config: ImQQBotConfig,
     private readonly logger: Logger,
   ) {
-    let presets: AgentPresetsLike | undefined;
-    try {
-      presets = this.ctx.get('agentPresets') as AgentPresetsLike | undefined;
-    } catch {
-      presets = undefined;
-    }
-    this.presets = presets;
-
-    this.registerOnAgents();
+    this.registerAnswerer();
     this.teardown();
   }
 
-  // ── Provider 注册 ──
+  // ── waterfall answerer 注册 ──
 
-  /** 监听 agent/created：为属于 qqbot preset（isolate userQuestions）的 agent 注册 Provider */
-  private registerOnAgents(): void {
-    const presets = this.presets;
-    if (!presets) {
-      this.logger.warn('im-qqbot: agentPresets service unavailable; user-questions provider not registered');
-      return;
-    }
-    (this.ctx as unknown as { on(event: string, handler: (...args: unknown[]) => void): unknown })
-      .on('agent/created', (payload: unknown) => {
-        const agent = (payload as { agent?: { ctx?: Context } } | null)?.agent;
-        if (agent?.ctx === undefined) return;
-        this.registerForAgent(agent as { ctx: Context });
+  /**
+   * 在插件 root ctx 注册 `user-questions/request` waterfall 监听器。
+   *
+   * dsh 0.1.5 起 userQuestions 由「Provider 注册」改为「scoped waterfall 事件」：
+   * UserQuestionService.ask() 内部通过 `ctx.waterfall(scopeTarget(agent, agent),
+   * 'user-questions/request', {...request, agent}, noAnswerer)` 分发。root ctx 的
+   * 监听器能收到 scoped 事件（scopeTarget 的 filter 对无 scope tag 的 root
+   * 监听器永远放行，与 api-remotes 转发端同款注册方式）。handler 签名
+   * `(request, next)`：不调 next() 且返回 Promise 即消费；调 next() 放行给
+   * 下一个 answerer（web 弹窗）。
+   */
+  private registerAnswerer(): void {
+    (this.ctx as unknown as { on(event: string, handler: (request: unknown, next: () => unknown) => unknown): unknown })
+      .on('user-questions/request', (request: unknown, next: () => unknown) => {
+        const agent = (request as { agent?: DshAgent }).agent;
+        // 只响应属于本插件的 QQ 会话 agent；不是则放行（web answerer 会处理）
+        if (agent === undefined || this.manager.findByAgent(agent) === undefined) return next();
+        return this.ask(request as AskUserQuestionRequest);
       });
   }
 
-  /**
-   * 为单个 agent 注册 Provider。
-   *
-   * 只有挂载了隔离 userQuestions 的 preset（qqbot）能拿到实例；web/standard 的
-   * agent 拿不到 → 不注册，其提问继续走 root 的 web Provider（现状，不受影响）。
-   */
-  private registerForAgent(agent: { ctx: Context }): void {
-    const presets = this.presets;
-    if (!presets) return;
-
-    let uq: unknown;
-    try {
-      uq = presets.serviceFor(agent, 'userQuestions');
-    } catch (err) {
-      this.logger.warn(`im-qqbot: serviceFor(userQuestions) failed: ${err instanceof Error ? err.message : String(err)}`);
-      return;
-    }
-    if (uq === undefined) return;
-
-    const instance = uq as object;
-    if (this.providerRegistered.has(instance)) return; // 同 preset standing 只注册一次
-
-    try {
-      (uq as { registerProvider(provider: unknown): () => void }).registerProvider(this.makeProvider());
-      this.providerRegistered.add(instance);
-      this.logger.info('im-qqbot: user-questions provider registered (isolated instance)');
-    } catch (err) {
-      // DUPLICATE_PROVIDER 等：说明该实例已被（可能是旧插件实例）注册，降级使用
-      this.logger.warn(`im-qqbot: registerProvider failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-
-  /** 插件卸载时，对全部挂起提问 reject ASK_ABORTED（同 web Provider 行为） */
+  /** 插件卸载时，对全部挂起提问 reject ASK_ABORTED（同 web answerer 行为） */
   private teardown(): void {
     (this.ctx as unknown as { effect(fn: () => (() => void) | void, name?: string): unknown })
       .effect(() => () => {
         for (const pending of [...this.pending.values()]) {
           this.cleanup(pending);
-          pending.reject(new UserQuestionError('im-qqbot user-questions provider was disposed', 'ASK_ABORTED'));
+          pending.reject(new UserQuestionError('im-qqbot user-questions answerer was disposed', 'ASK_ABORTED'));
         }
       }, 'im-qqbot.user-questions.teardown');
-  }
-
-  private makeProvider(): { ask(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> } {
-    return { ask: (request) => this.ask(request) };
   }
 
   // ── ask：挂起 + 渲染 + 超时/abort ──
