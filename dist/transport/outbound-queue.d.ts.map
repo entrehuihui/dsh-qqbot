@@ -1,0 +1,1 @@
+{"version":3,"file":"outbound-queue.d.ts","sourceRoot":"","sources":["../../src/transport/outbound-queue.ts"],"names":[],"mappings":"AAAA;;;;GAIG;AACH,qBAAa,aAAa;IAIZ,OAAO,CAAC,QAAQ,CAAC,aAAa;IAH1C,OAAO,CAAC,KAAK,CAAoC;IACjD,OAAO,CAAC,UAAU,CAAK;gBAEM,aAAa,SAAM;IAEhD,OAAO,CAAC,CAAC,EAAE,IAAI,EAAE,MAAM,OAAO,CAAC,CAAC,CAAC,GAAG,OAAO,CAAC,CAAC,CAAC;CAsB/C"}
