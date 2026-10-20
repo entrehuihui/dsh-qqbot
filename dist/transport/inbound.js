@@ -1,6 +1,7 @@
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { classifyContentType, isVoiceContentType, } from './attachment.js';
 import { clearGroupHistory } from '../features/history-store.js';
+import { deliverUserMessage } from '../shared/deliver.js';
 // ── 主处理函数 ──
 /**
  * 处理 QQ 入站消息（已经过 SDK 中间件链）
@@ -38,14 +39,13 @@ export async function handleInbound(rawMsg, manager, config, logger, state, user
             return;
         }
     }
-    // ── 构建 UserMessage → followup ──
+    // ── 构建 UserMessage → 投递（繁忙时按 busySend 决定插话还是排队） ──
     const content = [{ type: 'text', text: agentBody }];
     const message = createUserMessage({
         content,
         source: { kind: 'user' },
     });
-    record.agent.followup(message);
-    logger.info(`→ followup sent: key=${scope}:${peerId}`);
+    deliverUserMessage(record.agent, message, config.busySend, logger, `key=${scope}:${peerId}`);
     // 群消息回复后清空历史缓存（避免下次 @ 时重复组包，对齐 openclaw-qqbot dispatch）
     if (scope === 'group') {
         clearGroupHistory(config.appId, msg.groupOpenid ?? msg.senderId);

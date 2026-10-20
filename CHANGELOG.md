@@ -4,6 +4,18 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.6.3] - 2026-10-20
+
+### 新功能
+
+- **繁忙时插话**：新增 `busySend` 配置（默认 `steer`）。Agent 正在跑上一轮时，QQ 进来的新消息不再排成新的一轮等它结束，而是插到最近的 step 边界 —— 当前轮下一个 step 就能读到并回应。想退回旧行为设 `busySend: queue` 即可。卡片按钮点击的回传走同一策略。
+
+### 说明
+
+- 对齐 dsh Web 端「繁忙时的发送行为」设置（`ui-conversation` 的 `busyEnter`）；那条设置只作用于前端输入框，QQ 渠道由本插件独立控制。
+- 插话只在 Agent `running` 时生效，空闲时仍走普通 `followup` 开新轮。
+- `steer` 是「下一个 step 边界被读到」，不是中断正在执行中的工具调用；要强停当前生成用 `/stop`。
+
 ## [0.6.1] - 2026-08-17
 
 ### 新功能

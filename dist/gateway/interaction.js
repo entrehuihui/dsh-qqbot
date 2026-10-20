@@ -1,7 +1,10 @@
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
+import { deliverUserMessage } from '../shared/deliver.js';
 /** 提问按钮 data 前缀（与 features/user-questions.ts 保持一致） */
 const UQ_BUTTON_PREFIX = 'uq:';
-export function registerInteractionHandler(bot, manager, logger, userQuestions) {
+export function registerInteractionHandler(bot, manager, logger, userQuestions, config) {
+    /** 繁忙时的投递方式（配置缺省时与 schema 默认一致：插话） */
+    const busySend = config?.busySend ?? 'steer';
     bot.on('interaction', async (_ctx, event) => {
         try {
             const scope = event.group_openid || event.group_member_openid ? 'group' : 'c2c';
@@ -40,7 +43,7 @@ export function registerInteractionHandler(bot, manager, logger, userQuestions) 
                 source: { kind: 'user' },
             });
             const record = await manager.getOrCreate(scope, peerId, senderId, replyTarget);
-            record.agent.followup(message);
+            deliverUserMessage(record.agent, message, busySend, logger, `interaction scope=${scope}`);
             await bot.acknowledgeInteraction(event.id, 0);
             logger.info(`im-qqbot: interaction handled scope=${scope} data=${buttonData}`);
         }

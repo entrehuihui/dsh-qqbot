@@ -15,6 +15,7 @@ export const ConfigSchema = Schema.object({
     textChunkLimit: Schema.number().default(4500).description('单条消息最大字符数'),
     streaming: Schema.boolean().default(true).description('是否启用流式输出（群聊始终不启用）'),
     sessionIdleTimeout: Schema.number().default(30 * 60 * 1000).description('会话闲置超时(ms)'),
+    busySend: Schema.union(['steer', 'queue']).default('steer').description('繁忙时的发送行为：steer=插话，queue=排队'),
     maxQueue: Schema.number().default(20).description('并发队列最大长度'),
     processingTimeoutMs: Schema.number().default(120000).description('处理超时(ms)'),
     historyLimit: Schema.number().default(10).description('群历史缓冲条数'),

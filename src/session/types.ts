@@ -32,6 +32,8 @@ export interface DshAgent {
   };
   cancel(cause: { kind: string }): void;
   followup(message: unknown): void;
+  /** 投到最近的 step 边界：idle 时开一轮，running 时在下一个 step 被读到（= 插话） */
+  steer(message: unknown): void;
   whenIdle(): Promise<void>;
   /** 运行一个非 turn 维护任务（compact 等需要 idle 时串行执行的操作） */
   runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;

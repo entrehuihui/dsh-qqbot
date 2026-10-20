@@ -62,8 +62,8 @@ export async function bootstrapGateway(
     await handleInbound(msg, manager, config, logger, mCtx.state, userQuestions);
   });
 
-  // ── 交互事件：按钮点击 → Agent（提问按钮先分流，未命中走 followup） ──
-  registerInteractionHandler(bot, manager, logger, userQuestions);
+  // ── 交互事件：按钮点击 → Agent（提问按钮先分流，未命中按 busySend 投递） ──
+  registerInteractionHandler(bot, manager, logger, userQuestions, config);
 
   // ── 出站：dsh session/event → QQ 消息 ──
   // 获取 tools 服务（工具结果结构化展示，参考 dsh-TUI presentResult），可选

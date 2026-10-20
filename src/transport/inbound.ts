@@ -21,6 +21,7 @@ import {
   type MediaKind,
 } from './attachment.js';
 import { clearGroupHistory } from '../features/history-store.js';
+import { deliverUserMessage } from '../shared/deliver.js';
 
 // ── 类型定义 ──
 
@@ -131,7 +132,7 @@ export async function handleInbound(
     }
   }
 
-  // ── 构建 UserMessage → followup ──
+  // ── 构建 UserMessage → 投递（繁忙时按 busySend 决定插话还是排队） ──
   const content: ContentBlock[] = [{ type: 'text' as const, text: agentBody }];
 
   const message = createUserMessage({
@@ -139,8 +140,7 @@ export async function handleInbound(
     source: { kind: 'user' as const },
   });
 
-  record.agent.followup(message);
-  logger.info(`→ followup sent: key=${scope}:${peerId}`);
+  deliverUserMessage(record.agent, message, config.busySend, logger, `key=${scope}:${peerId}`);
 
   // 群消息回复后清空历史缓存（避免下次 @ 时重复组包，对齐 openclaw-qqbot dispatch）
   if (scope === 'group') {

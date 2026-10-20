@@ -36,6 +36,15 @@ export interface VisionConfig {
     /** 视觉调用超时(ms) */
     timeoutMs: number;
 }
+/**
+ * 繁忙时的发送行为。
+ *
+ * - `steer`：Agent 正在跑上一轮时，新消息投到最近的 step 边界，当前轮下一个 step 就能读到（插话）；
+ * - `queue`：旧行为，新消息作为独立一轮排队，等当前轮结束。
+ *
+ * 对齐 Web 端 `ui-conversation` 的 `busyEnter` 设置；QQ 渠道由本配置独立控制。
+ */
+export type BusySendBehavior = 'steer' | 'queue';
 export interface ImQQBotConfig {
     /** QQ Bot AppID */
     appId: string;
@@ -61,6 +70,8 @@ export interface ImQQBotConfig {
     streaming: boolean;
     /** 每会话最大闲置时长(ms)，超时自动回收 */
     sessionIdleTimeout: number;
+    /** 繁忙时的发送行为：steer=插话（下一 step 边界读到），queue=排队等本轮结束 */
+    busySend: BusySendBehavior;
     /** 并发队列最大长度 */
     maxQueue: number;
     /** 处理超时(ms)，超时中断当前 LLM 调用 */

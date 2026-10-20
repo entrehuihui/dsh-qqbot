@@ -12,5 +12,6 @@ import type { QQBot } from '@tencent-connect/qqbot-nodejs';
 import type { SessionManager } from '../session/index.js';
 import type { UserQuestionsFeature } from '../features/user-questions.js';
 import type { Logger } from '../types.js';
-export declare function registerInteractionHandler(bot: QQBot, manager: SessionManager, logger: Logger, userQuestions?: UserQuestionsFeature): void;
+import type { ImQQBotConfig } from '../config.js';
+export declare function registerInteractionHandler(bot: QQBot, manager: SessionManager, logger: Logger, userQuestions?: UserQuestionsFeature, config?: ImQQBotConfig): void;
 //# sourceMappingURL=interaction.d.ts.map
