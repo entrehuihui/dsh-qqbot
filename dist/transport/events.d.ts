@@ -77,4 +77,27 @@ export declare function extractTurnError(reason: TurnEndReason): {
     code: string;
     message: string;
 } | undefined;
+/**
+ * 归一化后的流式增量（`agent/assistant-stream` 瞬态帧，chunk 不进 session log）。
+ */
+export type StreamDelta = {
+    kind: 'attempt-start';
+    attemptId: string;
+} | {
+    kind: 'text-delta';
+    attemptId: string;
+    text: string;
+};
+/**
+ * 解析 `agent/assistant-stream` 的 payload（对齐 @deepseek-ai/dsh-agent 的
+ * AssistantStreamFrame 最小契约，避免硬依赖）。
+ *
+ * 只归一化两类帧：start（新 attempt）与 chunk 的 text-delta（文本增量）。
+ * reasoning-delta / tool-call-delta 不进用户消息；end 帧不处理——收尾由 durable
+ * `assistant/message` / `turn/end` 事件负责。未知形态返回 undefined。
+ */
+export declare function parseStreamFrame(raw: unknown): {
+    agentId: string;
+    delta: StreamDelta;
+} | undefined;
 //# sourceMappingURL=events.d.ts.map

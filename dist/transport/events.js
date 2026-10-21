@@ -59,4 +59,35 @@ export function extractTurnError(reason) {
         message: detail?.message ?? reason.message ?? 'unknown error',
     };
 }
+/**
+ * 解析 `agent/assistant-stream` 的 payload（对齐 @deepseek-ai/dsh-agent 的
+ * AssistantStreamFrame 最小契约，避免硬依赖）。
+ *
+ * 只归一化两类帧：start（新 attempt）与 chunk 的 text-delta（文本增量）。
+ * reasoning-delta / tool-call-delta 不进用户消息；end 帧不处理——收尾由 durable
+ * `assistant/message` / `turn/end` 事件负责。未知形态返回 undefined。
+ */
+export function parseStreamFrame(raw) {
+    if (raw === null || typeof raw !== 'object')
+        return undefined;
+    const agentId = raw.agent?.id;
+    if (typeof agentId !== 'string' || !agentId)
+        return undefined;
+    const frame = raw.frame;
+    if (frame === null || typeof frame !== 'object')
+        return undefined;
+    const { type, attemptId } = frame;
+    if (typeof attemptId !== 'string' || !attemptId)
+        return undefined;
+    if (type === 'start') {
+        return { agentId, delta: { kind: 'attempt-start', attemptId } };
+    }
+    if (type === 'chunk') {
+        const chunk = frame.chunk;
+        if (chunk?.type !== 'text-delta' || typeof chunk.text !== 'string' || !chunk.text)
+            return undefined;
+        return { agentId, delta: { kind: 'text-delta', attemptId, text: chunk.text } };
+    }
+    return undefined;
+}
 //# sourceMappingURL=events.js.map

@@ -3,6 +3,7 @@ import { OutboundBuffer } from './outbound-buffer.js';
 import { OutboundQueue } from './outbound-queue.js';
 import { formatToolResult } from './tool-presenter.js';
 import { parseEvent, extractTurnError, } from './events.js';
+export { parseStreamFrame } from './events.js';
 /** 不展示给用户的轮次错误码（底层传输/网络错误，对用户无意义，且常被重试兜住） */
 const SILENT_TURN_ERROR_CODES = new Set(['STREAM_CLOSED']);
 /**
@@ -16,6 +17,8 @@ class OutboundRouter {
     buffers = new Map();
     toolCalls = new Map();
     outboundQueue = new OutboundQueue();
+    /** 每会话当前流式 attemptId：LLM 重试会发布新 attempt，用于 reset 与迟到帧过滤 */
+    streamAttempts = new Map();
     bot;
     constructor(manager, bot, config, logger, toolsRegistry) {
         this.manager = manager;
@@ -55,14 +58,47 @@ class OutboundRouter {
                 break;
         }
     }
-    /** 流式文本增量：累积到会话 buffer */
+    /** durable assistant/chunk 事件的流式增量（历史格式兼容保留，当前宿主不再生产该事件） */
     onChunk(sessionId, record, event) {
+        this.appendChunk(sessionId, record, event.text);
+    }
+    /**
+     * 实时流式帧入口（瞬态 agent/assistant-stream 事件）。
+     *
+     * attempt 语义：start 帧即新内容起点，无条件重置 buffer——清空旧 attempt 的
+     * 累积文本但保留流式会话（QQ 流式 update 是全量替换，用户看到同一条消息被
+     * 新内容重写）。不用 attemptId 对比判断"新 attempt"：agent replacement 后
+     * attempt 计数重启、attemptId 可能与旧 agent 重叠（官方按 frame revision 的
+     * gap 检测处理同一问题）。迟到帧（attemptId 不匹配）仍直接丢弃，防止旧
+     * attempt 的尾巴混进新内容。
+     */
+    routeStreamFrame(agentId, delta) {
+        if (delta.kind === 'attempt-start') {
+            this.streamAttempts.set(agentId, delta.attemptId);
+            this.buffers.get(agentId)?.reset();
+            return;
+        }
+        // text-delta：首帧未见 start 时自愈记录，迟到帧丢弃
+        const current = this.streamAttempts.get(agentId);
+        if (current === undefined) {
+            this.streamAttempts.set(agentId, delta.attemptId);
+        }
+        else if (current !== delta.attemptId) {
+            return;
+        }
+        const record = this.manager.findBySessionId(agentId);
+        if (record === undefined)
+            return;
+        this.appendChunk(agentId, record, delta.text);
+    }
+    /** 获取或创建会话 buffer 并追加增量 */
+    appendChunk(sessionId, record, text) {
         let buffer = this.buffers.get(sessionId);
         if (buffer === undefined) {
             buffer = new OutboundBuffer(record, this.bot, this.config.textChunkLimit, this.logger, this.shouldStream(record));
             this.buffers.set(sessionId, buffer);
         }
-        buffer.append(event.text);
+        buffer.append(text);
     }
     /** 是否启用流式：配置开启 + c2c + 有 msgId（群聊不支持流式） */
     shouldStream(record) {
@@ -106,7 +142,7 @@ class OutboundRouter {
             return;
         void this.send(record, text, 'sendToolResult');
     }
-    /** 轮次结束：清理 buffer，异常结束时告知用户 */
+    /** 轮次结束：清理 buffer 与 attempt 跟踪状态，异常结束时告知用户 */
     onTurnEnd(sessionId, record, event) {
         const buffer = this.buffers.get(sessionId);
         if (buffer !== undefined) {
@@ -118,6 +154,7 @@ class OutboundRouter {
             }
             this.buffers.delete(sessionId);
         }
+        this.streamAttempts.delete(sessionId);
         const failure = extractTurnError(event.reason);
         if (failure !== undefined && !SILENT_TURN_ERROR_CODES.has(failure.code)) {
             void this.send(record, `⚠️ 本轮异常结束\n\`${failure.code}\`: ${failure.message}`, 'sendTurnEndError');
@@ -140,11 +177,15 @@ class OutboundRouter {
 /**
  * 创建出站事件处理器
  *
- * 返回一个 handler 函数，应注册到 ctx.on('session/event', handler)。
+ * 返回 durable 事件与实时流式帧两个入口，分别注册到
+ * ctx.on('session/event') 与 ctx.on('agent/assistant-stream', ..., { global: true })。
  * toolsRegistry 用于工具结果的结构化展示（参考 dsh-TUI 的 presentResult）。
  */
 export function createOutboundHandler(manager, bot, config, logger, toolsRegistry) {
     const router = new OutboundRouter(manager, bot, config, logger, toolsRegistry);
-    return (session, event) => router.route(session, event);
+    return {
+        routeSessionEvent: (session, event) => router.route(session, event),
+        routeStreamFrame: (agentId, delta) => router.routeStreamFrame(agentId, delta),
+    };
 }
 //# sourceMappingURL=outbound.js.map

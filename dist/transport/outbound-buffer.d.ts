@@ -29,6 +29,8 @@ export declare class OutboundBuffer {
     append(text: string): void;
     /** 获取当前累积文本 */
     get text(): string;
+    /** 重置累积文本（LLM 重试的新 attempt），流式会话保留由全量 update 重写 */
+    reset(): void;
     /** 发送所有累积文本：流式优先，降级静态 */
     flush(): Promise<void>;
     /** 取消（异常/丢弃），中止流式并清空缓冲 */

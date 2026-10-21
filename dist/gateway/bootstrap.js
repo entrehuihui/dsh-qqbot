@@ -1,6 +1,7 @@
 import { QQBot } from '@tencent-connect/qqbot-nodejs';
 import { SessionManager } from '../session/index.js';
 import { handleInbound, createOutboundHandler } from '../transport/index.js';
+import { parseStreamFrame } from '../transport/events.js';
 import { buildUserAgent } from '../shared/index.js';
 import { setupMiddlewares } from './middleware-setup.js';
 import { registerQQMediaTools } from '../tools/qq-media.js';
@@ -60,9 +61,19 @@ export async function bootstrapGateway(ctx, agents, config, logger) {
             },
         }),
     };
-    const outboundHandler = createOutboundHandler(manager, sender, config, logger, toolsRegistry);
+    const outbound = createOutboundHandler(manager, sender, config, logger, toolsRegistry);
     ctx
-        .on('session/event', outboundHandler);
+        .on('session/event', outbound.routeSessionEvent);
+    // ── 出站流式：agent/assistant-stream → 流式帧路由 ──
+    // 实时流式走瞬态 agent/assistant-stream（chunk 不进 session log）。
+    // 该事件按 agent 作用域派发，根作用域监听器不带 global 会被过滤（同
+    // approval/request），帧到达后自行按 agent.id 路由，非 QQ 会话在 router 内忽略。
+    ctx
+        .on('agent/assistant-stream', (payload) => {
+        const parsed = parseStreamFrame(payload);
+        if (parsed !== undefined)
+            outbound.routeStreamFrame(parsed.agentId, parsed.delta);
+    }, { global: true });
     bot.on('error', (err) => {
         logger.error(`bot error: ${err instanceof Error ? err.message : String(err)}`);
     });

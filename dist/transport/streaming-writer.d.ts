@@ -33,6 +33,14 @@ export declare class StreamingWriter {
     get shouldFallback(): boolean;
     /** 累积全文（降级静态发送时使用） */
     get text(): string;
+    /**
+     * 重置累积文本（LLM 重试的新 attempt）。
+     *
+     * 保留已打开的流式会话与 sentChunkCount：QQ 流式 update 是全量替换语义，
+     * 新 attempt 的增量会把同一条消息整体重写，用户不会看到两条消息；
+     * sentChunkCount 保留则防止重试后误判"从未发送"而降级静态造成重复。
+     */
+    reset(): void;
     /** 追加增量文本，节流（throttle）后 update 全量 */
     append(delta: string): void;
     /** 结束：flush 最终文本 + complete 收尾 */
