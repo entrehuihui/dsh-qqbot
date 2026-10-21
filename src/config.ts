@@ -75,6 +75,8 @@ export interface ImQQBotConfig {
   streaming: boolean;
   /** 每会话最大闲置时长(ms)，超时自动回收 */
   sessionIdleTimeout: number;
+  /** /new 后最多保留多少个已脱离会话（保持存活，侧栏可见） */
+  keepDetachedSessions: number;
   /** 繁忙时的发送行为：steer=插话（下一 step 边界读到），queue=排队等本轮结束 */
   busySend: BusySendBehavior;
   /** 并发队列最大长度 */
@@ -112,6 +114,7 @@ export const ConfigSchema: Schema<ImQQBotConfig> = Schema.object({
   textChunkLimit: Schema.number().default(4500).description('单条消息最大字符数'),
   streaming: Schema.boolean().default(true).description('是否启用流式输出（群聊始终不启用）'),
   sessionIdleTimeout: Schema.number().default(30 * 60 * 1000).description('会话闲置超时(ms)'),
+  keepDetachedSessions: Schema.number().default(30).description('/new 后最多保留多少个已脱离会话（保持存活，侧栏可见）'),
   busySend: Schema.union(['steer', 'queue']).default('steer').description('繁忙时的发送行为：steer=插话，queue=排队'),
   maxQueue: Schema.number().default(20).description('并发队列最大长度'),
   processingTimeoutMs: Schema.number().default(120000).description('处理超时(ms)'),

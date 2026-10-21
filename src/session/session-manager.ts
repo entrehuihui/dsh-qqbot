@@ -46,6 +46,19 @@ const COMPACTION_ERROR_HINTS: Record<string, string> = {
 
 export class SessionManager {
   private sessions = new Map<string, SessionRecord>();
+  /**
+   * `/new` 之后被「脱离」的会话记录。
+   *
+   * 上游直接 `handle.dispose()`，宿主随即发出 `session/disposed`，
+   * api-session-controller 把它转成 `api-session/removed` 推给前端，
+   * 前端从侧栏列表里把这行 filter 掉 —— 用户看到的就是「会话被清掉了」，
+   * 实际上磁盘上一个字节都没少。
+   *
+   * 这里改为保留记录、不 dispose：旧会话继续活在宿主里，侧栏（未分组）
+   * 照常可见、可点开继续看/聊。数量受 config.keepDetachedSessions 限制，
+   * 超出时按 FIFO 真正释放最早的，避免无限增长。
+   */
+  private detachedSessions: SessionRecord[] = [];
   private readonly evictor: IdleEvictor;
   private readonly modelResolver: ModelResolver;
 
@@ -376,8 +389,18 @@ export class SessionManager {
     if (!record) return;
     this.sessions.delete(key);
     record.agent.cancel({ kind: 'user' });
-    await record.handle.dispose().catch(() => {});
-    this.logger.info(`session removed: key=${key}`);
+    // 保留而不 dispose：dispose 会让宿主发 session/disposed → api-session/removed，
+    // 前端随即把这条从侧栏剔除。这里只解除 QQ peer 映射，旧会话继续存活。
+    this.detachedSessions.push(record);
+    const keep = Math.max(0, this.config.keepDetachedSessions);
+    while (this.detachedSessions.length > keep) {
+      const evicted = this.detachedSessions.shift();
+      if (evicted === undefined) break;
+      await evicted.handle.dispose().catch(() => {});
+    }
+    this.logger.info(
+      `session detached (kept in sidebar): key=${key} sessionId=${record.sessionId} detached=${this.detachedSessions.length}`,
+    );
   }
 
   /**
@@ -431,8 +454,9 @@ export class SessionManager {
 
   async disposeAll(): Promise<void> {
     this.evictor.dispose();
-    const records = [...this.sessions.values()];
+    const records = [...this.sessions.values(), ...this.detachedSessions];
     this.sessions.clear();
+    this.detachedSessions = [];
     for (const record of records) {
       record.agent.cancel({ kind: 'user' });
     }

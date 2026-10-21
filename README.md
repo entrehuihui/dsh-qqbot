@@ -80,6 +80,7 @@ npx @deepseek-ai/dsh web --patch /path/to/dsh-qqbot/cordis.dev.yml
 | `directPrompt` | string | - | 私聊额外 system prompt |
 | `textChunkLimit` | number | `4500` | 单条消息最大字符数 |
 | `sessionIdleTimeout` | number | `1800000` | 会话闲置超时(ms)，默认 30 分钟 |
+| `keepDetachedSessions` | number | `30` | `/new` 后最多保留多少个「已脱离」的旧会话（保持存活，侧栏可见）；`0` 表示立即释放 |
 | `busySend` | `'steer' \| 'queue'` | `steer` | Agent 正在跑上一轮时新消息怎么投递：`steer` 插话（下一个 step 边界读到）、`queue` 排队等本轮结束 |
 | `debug` | boolean | `false` | 调试模式 |
 
