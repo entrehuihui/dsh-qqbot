@@ -12,7 +12,7 @@ import type { BusySendBehavior } from '../config.js';
 import type { Logger } from '../types.js';
 /** 投递所需的最小 Agent 视图（`DshAgent` 结构兼容） */
 export interface DeliverableAgent {
-    readonly status: 'idle' | 'running';
+    readonly status: 'idle' | 'running' | 'blocked';
     followup(message: unknown): void;
     steer(message: unknown): void;
 }

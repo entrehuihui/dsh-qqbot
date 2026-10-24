@@ -4,6 +4,17 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.6.5] - 2026-10-24
+
+### 修复
+
+- **会话被归档后，QQ 发消息没反应、也不新建会话**：在侧栏把 QQ 对应的会话归档之后，再发消息就走不通了 —— 看不到回复，侧栏也不会多出新会话，只有手动 `/new` 才能恢复。
+  - 根因：归档会话是「假活」。`agents.get()` 拿得到、`agents.resume()` 也照样能从磁盘恢复且**不报错**，但 DSH 的 `archived-session-gate` 会在 `agent/pre-step` 直接 reject（"an archived Session must not run a model step until it is restored"），这一轮根本不跑模型。插件却以为投递成功，日志还写「已投递」。
+  - 现在 `getOrCreate` 在解析 sessionId 之后先查 `workspaceRegistry.archivedSessionIds`，命中就自动换一个全新会话（等价于自动 `/new`），旧会话不 dispose、不 unarchive，仍按原样留在侧栏。
+  - 同时给 `agents.get()` 返回的活句柄加了同样的兜底：若该会话已被归档，放掉句柄并新建，避免「归档了正在跑的会话」卡死。
+  - 投递时若 Agent 处于 `blocked` 状态，日志会明确告警，便于把这类问题与网络/凭据故障区分开。
+  - 参考实现来自同环境的 `@local/dsh-cluster` 插件（其 `isArchivedSession`）：该插件此前踩过同一个坑，处理方式保持一致。
+
 ## [0.6.4] - 2026-10-21
 
 ### 修复

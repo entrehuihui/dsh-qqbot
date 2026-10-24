@@ -45,6 +45,23 @@ export declare class SessionManager {
     private sessionKey;
     private deriveSessionId;
     private currentSessionId;
+    /**
+     * 这个会话是不是被归档（archived）了？
+     *
+     * ★★ 归档会话是「假活」：`agents.get()` 拿得到、`agents.resume()` 也照样能从
+     * 磁盘恢复出来，而且**不报错**。但 DSH 的 `archived-session-gate` 会在
+     * `agent/pre-step` 直接 reject —— 它自己的注释写得很清楚：
+     * 「an archived Session ... must not run a model step until it is restored」
+     * 「the loop ends as 'blocked' without a request」。
+     *
+     * 于是本插件以为拿到了活会话，`followup` 注入成功、日志还老实写「已投递」，
+     * agent 却永远不跑：不发模型请求、不回话。用户那边看到的就是
+     * 「QQ 发消息没反应，也没有新会话」——只有 `/new` 换掉 sessionId 才恢复。
+     *
+     * 所以用到某个会话之前必须自己查一眼归档集合，把它当「这个会话不可用」。
+     * 同样的坑 dsh-cluster 插件踩过（见其 `isArchivedSession`），处理方式保持一致。
+     */
+    private isArchivedSession;
     private composePreset;
     /** 获取或恢复或创建会话（get → resume → create） */
     getOrCreate(scope: ChatScope, peerId: string, senderId: string, replyTarget: ReplyTarget): Promise<SessionRecord>;

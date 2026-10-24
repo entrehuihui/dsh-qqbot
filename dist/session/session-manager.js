@@ -216,6 +216,35 @@ export class SessionManager {
     currentSessionId(sessionKey) {
         return this.modelResolver.getSessionId(sessionKey) ?? this.deriveSessionId(sessionKey);
     }
+    /**
+     * 这个会话是不是被归档（archived）了？
+     *
+     * ★★ 归档会话是「假活」：`agents.get()` 拿得到、`agents.resume()` 也照样能从
+     * 磁盘恢复出来，而且**不报错**。但 DSH 的 `archived-session-gate` 会在
+     * `agent/pre-step` 直接 reject —— 它自己的注释写得很清楚：
+     * 「an archived Session ... must not run a model step until it is restored」
+     * 「the loop ends as 'blocked' without a request」。
+     *
+     * 于是本插件以为拿到了活会话，`followup` 注入成功、日志还老实写「已投递」，
+     * agent 却永远不跑：不发模型请求、不回话。用户那边看到的就是
+     * 「QQ 发消息没反应，也没有新会话」——只有 `/new` 换掉 sessionId 才恢复。
+     *
+     * 所以用到某个会话之前必须自己查一眼归档集合，把它当「这个会话不可用」。
+     * 同样的坑 dsh-cluster 插件踩过（见其 `isArchivedSession`），处理方式保持一致。
+     */
+    isArchivedSession(sessionIdStr) {
+        try {
+            const reg = this.ctx.get('workspaceRegistry');
+            const ids = reg?.archivedSessionIds;
+            if (!Array.isArray(ids))
+                return false;
+            return ids.some((id) => String(id) === String(sessionIdStr));
+        }
+        catch {
+            // 宿主没有这个服务、或 workspace 状态还没就绪：当作没归档，别因此挡住正常工作
+            return false;
+        }
+    }
     async composePreset(presetId) {
         let presets;
         try {
@@ -250,6 +279,17 @@ export class SessionManager {
             existing.lastActivity = Date.now();
             return existing;
         }
+        // ★★ 归档会话是「假活」：get 得到、resume 得回来，但每个 step 都被 gate 拒。
+        //    碰到就当它不存在，换一个全新会话，等价于自动 /new。
+        //    只换一次：新 stamp 派生出的 sessionId 是全新的，不可能同时落进归档集合。
+        //    旧会话不 dispose、不 unarchive，仍按主人原来的归档留在侧栏。
+        const candidateId = this.currentSessionId(key);
+        if (this.isArchivedSession(candidateId)) {
+            this.logger.warn(`im-qqbot: 会话 ${candidateId}（key=${key}）已被归档：归档会话的每个 step 都会被 ` +
+                `DSH 的 archived-session-gate 拒掉，消息注进去也不会执行（表现为「发了没反应」）。` +
+                `自动换一个新会话，旧会话仍留在侧栏。`);
+            this.modelResolver.setSessionId(key, `${Date.now()}-${randomUUID().slice(0, 8)}`);
+        }
         const route = this.modelResolver.getEffectiveRoute(key);
         const sessionId = SessionId(this.currentSessionId(key));
         this.logger.info(`getOrCreate: key=${key} route=${route ? `${route.provider}/${route.model}` : 'host-default'} sessionId=${sessionId}`);
@@ -258,6 +298,20 @@ export class SessionManager {
         let agentPreset;
         const live = this.agents.get(sessionId);
         if (live) {
+            // ★ 兜底：活句柄也可能指向归档会话（比如主人刚在侧栏归档了一个正在跑的会话），
+            //   这时 agents.get() 照样返回它，但 step 会被 gate 拒 → 永远不回。
+            //   命中就放掉旧句柄、换成全新会话。
+            if (this.isArchivedSession(String(sessionId))) {
+                this.logger.warn(`im-qqbot: 活句柄 ${sessionId}（key=${key}）已被归档，丢弃并新建会话`);
+                try {
+                    await this.findByAgent(live)?.handle.dispose();
+                }
+                catch {
+                    // 只求解绑，别让清理动作挡住回复
+                }
+                this.modelResolver.setSessionId(key, `${Date.now()}-${randomUUID().slice(0, 8)}`);
+                return this.getOrCreate(scope, peerId, senderId, replyTarget);
+            }
             agent = live;
             this.logger.info(`reusing live agent: key=${key}`);
         }

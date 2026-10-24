@@ -13,7 +13,7 @@ import type { Logger } from '../types.js';
 
 /** 投递所需的最小 Agent 视图（`DshAgent` 结构兼容） */
 export interface DeliverableAgent {
-  readonly status: 'idle' | 'running';
+  readonly status: 'idle' | 'running' | 'blocked';
   followup(message: unknown): void;
   steer(message: unknown): void;
 }
@@ -39,6 +39,14 @@ export function deliverUserMessage(
   logger: Logger,
   label: string,
 ): void {
+  // ★ 归档会话的 followup 会「静默成功」——注入不报错，但 DSH 的
+  //   archived-session-gate 在 agent/pre-step 直接 reject，这一轮根本不跑，
+  //   主人看到的就是「发了没反应」。正常路径已在 SessionManager.getOrCreate
+  //   里识别归档并换新会话；这里留一条告警，方便排障时一眼认出是归档而不是别的毛病。
+  if (agent.status === 'blocked') {
+    logger.warn(`→ deliver to BLOCKED agent（可能被 archived-session-gate 拒了，查该会话是否已归档）: ${label}`);
+  }
+
   if (agent.status === 'running' && busySend === 'steer') {
     agent.steer(message);
     logger.info(`→ steer sent (busy, 插话): ${label}`);
